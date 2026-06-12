@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "Gold Coast Field Connect",
+    "slug": "gold-coast-field-sales-connect-app",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "gcfieldconnect",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.goldcoast.fieldconnect"
+    },
+    "android": {
+      "package": "com.goldcoast.fieldconnect",
+      "adaptiveIcon": {
+        "backgroundColor": "#0D3B66"
+      }
+    },
+    "extra": {
+      "erpnextBaseUrl": "https://snrgv15backedup.m.frappe.cloud"
+    }
+  }
+}
+
