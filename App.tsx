@@ -19,9 +19,12 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { ApiClient, ApiError, DEFAULT_BASE_URL } from "./src/lib/api";
 import { clearSession, loadSession, saveSession, StoredSession } from "./src/lib/session";
 import {
+  CustomerSearchResult,
   DashboardSummary,
+  ItemSearchResult,
   MeResponse,
   QuotationDetail,
+  QuotationInputItem,
   QuotationListItem
 } from "./src/lib/types";
 
@@ -75,6 +78,7 @@ export default function App() {
 function MainApp({ api, onLogout }: { api: ApiClient; onLogout: () => void }) {
   const [tab, setTab] = useState<Tab>("home");
   const [selectedQuotation, setSelectedQuotation] = useState<string | null>(null);
+  const [creatingQuotation, setCreatingQuotation] = useState(false);
 
   return (
     <ScreenShell>
@@ -87,14 +91,27 @@ function MainApp({ api, onLogout }: { api: ApiClient; onLogout: () => void }) {
       </View>
 
       <View style={styles.content}>
-        {selectedQuotation ? (
+        {creatingQuotation ? (
+          <CreateQuotationScreen
+            api={api}
+            onBack={() => setCreatingQuotation(false)}
+            onSaved={(quotation) => {
+              setCreatingQuotation(false);
+              setSelectedQuotation(quotation);
+            }}
+          />
+        ) : selectedQuotation ? (
           <QuotationDetailScreen
             api={api}
             quotation={selectedQuotation}
             onBack={() => setSelectedQuotation(null)}
           />
         ) : tab === "home" ? (
-          <HomeScreen api={api} onOpenQuotations={() => setTab("quotations")} />
+          <HomeScreen
+            api={api}
+            onCreateQuotation={() => setCreatingQuotation(true)}
+            onOpenQuotations={() => setTab("quotations")}
+          />
         ) : tab === "quotations" ? (
           <QuotationsScreen api={api} onSelect={setSelectedQuotation} />
         ) : (
@@ -102,7 +119,7 @@ function MainApp({ api, onLogout }: { api: ApiClient; onLogout: () => void }) {
         )}
       </View>
 
-      {!selectedQuotation && <BottomTabs active={tab} onChange={setTab} />}
+      {!selectedQuotation && !creatingQuotation && <BottomTabs active={tab} onChange={setTab} />}
     </ScreenShell>
   );
 }
@@ -178,7 +195,15 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: (session: StoredSession) => v
   );
 }
 
-function HomeScreen({ api, onOpenQuotations }: { api: ApiClient; onOpenQuotations: () => void }) {
+function HomeScreen({
+  api,
+  onCreateQuotation,
+  onOpenQuotations
+}: {
+  api: ApiClient;
+  onCreateQuotation: () => void;
+  onOpenQuotations: () => void;
+}) {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -201,7 +226,7 @@ function HomeScreen({ api, onOpenQuotations }: { api: ApiClient; onOpenQuotation
   return (
     <ScrollView refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}>
       <Text style={styles.screenTitle}>Home</Text>
-      <Pressable style={styles.createCard}>
+      <Pressable onPress={onCreateQuotation} style={styles.createCard}>
         <MaterialCommunityIcons name="file-document-outline" size={32} color="#fff" />
         <View>
           <Text style={styles.createTitle}>Create Quotation</Text>
@@ -332,6 +357,286 @@ function QuotationDetailScreen({ api, quotation, onBack }: { api: ApiClient; quo
         </>
       ) : null}
     </ScrollView>
+  );
+}
+
+function CreateQuotationScreen({
+  api,
+  onBack,
+  onSaved
+}: {
+  api: ApiClient;
+  onBack: () => void;
+  onSaved: (quotation: string) => void;
+}) {
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [customerQuery, setCustomerQuery] = useState("");
+  const [customers, setCustomers] = useState<CustomerSearchResult[]>([]);
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerSearchResult | null>(null);
+  const [itemQuery, setItemQuery] = useState("");
+  const [itemResults, setItemResults] = useState<ItemSearchResult[]>([]);
+  const [draftItems, setDraftItems] = useState<Array<ItemSearchResult & { qty: number }>>([]);
+  const [preview, setPreview] = useState<QuotationDetail | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const inputItems: QuotationInputItem[] = draftItems.map((item) => ({
+    item_code: item.item_code,
+    qty: item.qty
+  }));
+
+  async function searchCustomers() {
+    if (customerQuery.trim().length < 2) {
+      setCustomers([]);
+      setError("Enter at least 2 characters to search customers.");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    try {
+      setCustomers(await api.searchCustomers(customerQuery.trim()));
+    } catch (err) {
+      setError(readError(err, "Could not find customers"));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function searchItems() {
+    if (itemQuery.trim().length < 2) {
+      setItemResults([]);
+      setError("Enter at least 2 characters to search items.");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    try {
+      setItemResults(await api.searchItems(itemQuery.trim()));
+    } catch (err) {
+      setError(readError(err, "Could not find items"));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadPreview() {
+    if (!selectedCustomer || draftItems.length === 0) {
+      return;
+    }
+
+    setStep(3);
+    setLoading(true);
+    setError("");
+    try {
+      setPreview(await api.previewQuotation(selectedCustomer.name, inputItems));
+    } catch (err) {
+      setPreview(null);
+      setError(readError(err, "Could not calculate pricing"));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function saveDraft() {
+    if (!selectedCustomer || draftItems.length === 0) {
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    try {
+      const saved = await api.saveQuotationDraft(selectedCustomer.name, inputItems);
+      onSaved(saved.name);
+    } catch (err) {
+      setError(readError(err, "Could not save quotation"));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function addItem(item: ItemSearchResult) {
+    setDraftItems((current) => {
+      const existing = current.find((row) => row.item_code === item.item_code);
+      if (existing) {
+        return current.map((row) => (row.item_code === item.item_code ? { ...row, qty: row.qty + 1 } : row));
+      }
+      return [...current, { ...item, qty: 1 }];
+    });
+  }
+
+  function updateQty(itemCode: string, nextQty: number) {
+    const qty = Math.max(1, Math.floor(nextQty || 1));
+    setDraftItems((current) => current.map((row) => (row.item_code === itemCode ? { ...row, qty } : row)));
+  }
+
+  function removeItem(itemCode: string) {
+    setDraftItems((current) => current.filter((row) => row.item_code !== itemCode));
+  }
+
+  return (
+    <View style={styles.flex}>
+      <View style={styles.rowBetween}>
+        <Pressable onPress={step === 1 ? onBack : () => setStep((step - 1) as 1 | 2)} style={styles.backButton}>
+          <MaterialCommunityIcons name="arrow-left" size={20} color={colors.primary} />
+          <Text style={styles.backText}>{step === 1 ? "Close" : "Back"}</Text>
+        </Pressable>
+        <Text style={styles.stepText}>Step {step} of 3</Text>
+      </View>
+
+      <Text style={styles.screenTitle}>Create Quotation</Text>
+      <View style={styles.stepBar}>
+        <View style={[styles.stepDot, step >= 1 && styles.activeStepDot]} />
+        <View style={[styles.stepLine, step >= 2 && styles.activeStepLine]} />
+        <View style={[styles.stepDot, step >= 2 && styles.activeStepDot]} />
+        <View style={[styles.stepLine, step >= 3 && styles.activeStepLine]} />
+        <View style={[styles.stepDot, step >= 3 && styles.activeStepDot]} />
+      </View>
+
+      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+      {step === 1 ? (
+        <View style={styles.flex}>
+          <Text style={styles.sectionTitleNoTop}>Select Customer</Text>
+          <View style={styles.searchRow}>
+            <TextInput
+              value={customerQuery}
+              onChangeText={setCustomerQuery}
+              placeholder="Customer name, code, mobile"
+              style={[styles.input, styles.searchInput]}
+            />
+            <Pressable onPress={searchCustomers} style={styles.smallButton}>
+              {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.smallButtonText}>Search</Text>}
+            </Pressable>
+          </View>
+          {selectedCustomer ? (
+            <View style={styles.selectedBox}>
+              <Text style={styles.label}>Selected Customer</Text>
+              <Text style={styles.customerName}>{selectedCustomer.customer_name}</Text>
+              <Text style={styles.muted}>{selectedCustomer.name} {selectedCustomer.territory ? `• ${selectedCustomer.territory}` : ""}</Text>
+            </View>
+          ) : null}
+          <FlatList
+            data={customers}
+            keyExtractor={(item) => item.name}
+            ListEmptyComponent={!loading ? <EmptyState label="Search assigned customers" /> : null}
+            renderItem={({ item }) => (
+              <Pressable onPress={() => setSelectedCustomer(item)} style={styles.resultCard}>
+                <Text style={styles.customerName}>{item.customer_name}</Text>
+                <Text style={styles.muted}>{item.name} {item.territory ? `• ${item.territory}` : ""}</Text>
+                {item.mobile_no ? <Text style={styles.muted}>{item.mobile_no}</Text> : null}
+              </Pressable>
+            )}
+          />
+          <Pressable disabled={!selectedCustomer} onPress={() => setStep(2)} style={[styles.primaryButton, !selectedCustomer && styles.disabledButton]}>
+            <Text style={styles.primaryButtonText}>Continue</Text>
+          </Pressable>
+        </View>
+      ) : step === 2 ? (
+        <View style={styles.flex}>
+          <Text style={styles.sectionTitleNoTop}>Add Items</Text>
+          <View style={styles.selectedBox}>
+            <Text style={styles.label}>Customer</Text>
+            <Text style={styles.value}>{selectedCustomer?.customer_name}</Text>
+          </View>
+          <View style={styles.searchRow}>
+            <TextInput
+              value={itemQuery}
+              onChangeText={setItemQuery}
+              placeholder="Item name or code"
+              style={[styles.input, styles.searchInput]}
+            />
+            <Pressable onPress={searchItems} style={styles.smallButton}>
+              {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.smallButtonText}>Search</Text>}
+            </Pressable>
+          </View>
+          <ScrollView style={styles.flex}>
+            {draftItems.length ? (
+              <>
+                <Text style={styles.label}>Selected Items</Text>
+                {draftItems.map((item) => (
+                  <View key={item.item_code} style={styles.selectedItemCard}>
+                    <View style={styles.flex}>
+                      <Text style={styles.itemName}>{item.item_name}</Text>
+                      <Text style={styles.muted}>{item.item_code} • {item.stock_uom}</Text>
+                    </View>
+                    <View style={styles.qtyWrap}>
+                      <Pressable onPress={() => updateQty(item.item_code, item.qty - 1)} style={styles.qtyButton}>
+                        <Text style={styles.qtyButtonText}>-</Text>
+                      </Pressable>
+                      <TextInput
+                        keyboardType="number-pad"
+                        value={String(item.qty)}
+                        onChangeText={(value) => updateQty(item.item_code, Number(value))}
+                        style={styles.qtyInput}
+                      />
+                      <Pressable onPress={() => updateQty(item.item_code, item.qty + 1)} style={styles.qtyButton}>
+                        <Text style={styles.qtyButtonText}>+</Text>
+                      </Pressable>
+                    </View>
+                    <Pressable onPress={() => removeItem(item.item_code)} style={styles.iconButton}>
+                      <MaterialCommunityIcons name="trash-can-outline" size={20} color={colors.danger} />
+                    </Pressable>
+                  </View>
+                ))}
+              </>
+            ) : null}
+            <Text style={styles.label}>Search Results</Text>
+            {itemResults.map((item) => (
+              <Pressable key={item.item_code} onPress={() => addItem(item)} style={styles.resultCard}>
+                <Text style={styles.itemName}>{item.item_name}</Text>
+                <Text style={styles.muted}>{item.item_code} • {item.stock_uom} • {item.item_group}</Text>
+              </Pressable>
+            ))}
+            {!itemResults.length && !loading ? <EmptyState label="Search allowed items" /> : null}
+          </ScrollView>
+          <Pressable disabled={!draftItems.length} onPress={loadPreview} style={[styles.primaryButton, !draftItems.length && styles.disabledButton]}>
+            <Text style={styles.primaryButtonText}>Review Pricing</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <ScrollView>
+          <Text style={styles.sectionTitleNoTop}>Review</Text>
+          <View style={styles.selectedBox}>
+            <Text style={styles.label}>Customer</Text>
+            <Text style={styles.value}>{selectedCustomer?.customer_name}</Text>
+          </View>
+          {loading ? (
+            <Centered>
+              <ActivityIndicator color={colors.primary} />
+              <Text style={styles.muted}>Calculating ERPNext pricing...</Text>
+            </Centered>
+          ) : preview ? (
+            <>
+              <Text style={styles.amount}>{formatCurrency(preview.grand_total)}</Text>
+              <Text style={styles.muted}>Net total {formatCurrency(preview.net_total)} • {preview.item_count} items</Text>
+              <Text style={styles.sectionTitle}>Items</Text>
+              {preview.items.map((item) => (
+                <View key={`${item.item_code}-${item.qty}`} style={styles.itemRow}>
+                  <View style={styles.flex}>
+                    <Text style={styles.itemName}>{item.item_name}</Text>
+                    <Text style={styles.muted}>{item.item_code} • Qty {item.qty} {item.uom}</Text>
+                    <Text style={styles.muted}>Rate {formatCurrency(item.rate)} • Discount {item.discount_percentage}%</Text>
+                  </View>
+                  <Text style={styles.lineAmount}>{formatCurrency(item.amount)}</Text>
+                </View>
+              ))}
+              <Pressable onPress={loadPreview} style={styles.secondaryButton}>
+                <Text style={styles.secondaryButtonText}>Refresh Pricing</Text>
+              </Pressable>
+              <Pressable onPress={saveDraft} style={styles.primaryButton}>
+                <Text style={styles.primaryButtonText}>Save Draft</Text>
+              </Pressable>
+            </>
+          ) : (
+            <Pressable onPress={loadPreview} style={styles.primaryButton}>
+              <Text style={styles.primaryButtonText}>Try Again</Text>
+            </Pressable>
+          )}
+        </ScrollView>
+      )}
+    </View>
   );
 }
 
@@ -545,6 +850,23 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     fontSize: 16
   },
+  disabledButton: {
+    opacity: 0.45
+  },
+  secondaryButton: {
+    minHeight: 50,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 12
+  },
+  secondaryButtonText: {
+    color: colors.primary,
+    fontWeight: "800",
+    fontSize: 16
+  },
   errorText: {
     color: colors.danger,
     marginBottom: 12,
@@ -712,6 +1034,100 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     marginTop: 22,
     marginBottom: 10
+  },
+  sectionTitleNoTop: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: "800",
+    marginBottom: 10
+  },
+  stepText: {
+    color: colors.muted,
+    fontWeight: "800"
+  },
+  stepBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 16
+  },
+  stepDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: colors.border
+  },
+  activeStepDot: {
+    backgroundColor: colors.primary
+  },
+  stepLine: {
+    flex: 1,
+    height: 2,
+    backgroundColor: colors.border
+  },
+  activeStepLine: {
+    backgroundColor: colors.primary
+  },
+  selectedBox: {
+    backgroundColor: "#EEF6FF",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#CFE7FF",
+    padding: 12,
+    marginBottom: 12
+  },
+  resultCard: {
+    backgroundColor: colors.card,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 12,
+    marginBottom: 8
+  },
+  selectedItemCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: colors.card,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 12,
+    marginBottom: 8
+  },
+  qtyWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    overflow: "hidden"
+  },
+  qtyButton: {
+    width: 34,
+    height: 38,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F8FAFC"
+  },
+  qtyButtonText: {
+    color: colors.primary,
+    fontWeight: "900",
+    fontSize: 18
+  },
+  qtyInput: {
+    width: 48,
+    height: 38,
+    textAlign: "center",
+    color: colors.text,
+    backgroundColor: colors.card
+  },
+  iconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FEF3F2"
   },
   itemRow: {
     flexDirection: "row",

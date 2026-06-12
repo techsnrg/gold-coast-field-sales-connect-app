@@ -57,3 +57,21 @@ export type QuotationDetail = QuotationListItem & {
   net_total: number;
 };
 
+export type CustomerSearchResult = {
+  name: string;
+  customer_name: string;
+  territory?: string;
+  mobile_no?: string;
+};
+
+export type ItemSearchResult = {
+  item_code: string;
+  item_name: string;
+  stock_uom: string;
+  item_group: string;
+};
+
+export type QuotationInputItem = {
+  item_code: string;
+  qty: number;
+};

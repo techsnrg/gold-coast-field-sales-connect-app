@@ -9,6 +9,12 @@ React Native / Expo mobile app for Gold Coast field sales users.
 - Dashboard summary
 - My Quotations
 - Quotation detail
+- Create quotation flow
+  - assigned customer search
+  - allowed item search
+  - whole-number quantity
+  - ERPNext pricing preview
+  - save draft
 - Profile/logout
 
 The backend is the ERPNext app:
@@ -34,4 +40,3 @@ npm run start
 
 - Do not submit quotations from the app during testing unless WhatsApp automation should trigger.
 - Session storage uses Expo SecureStore.
-

@@ -3,9 +3,12 @@ import Constants from "expo-constants";
 import {
   ApiEnvelope,
   ApiErrorBody,
+  CustomerSearchResult,
   DashboardSummary,
+  ItemSearchResult,
   MeResponse,
   QuotationDetail,
+  QuotationInputItem,
   QuotationListItem
 } from "./types";
 
@@ -77,10 +80,46 @@ export class ApiClient {
     return this.get<QuotationDetail>("quotation_detail", { quotation });
   }
 
+  async searchCustomers(query: string) {
+    return this.get<{ customers: CustomerSearchResult[] }>("search_customers", { query }).then(
+      (response) => response.customers
+    );
+  }
+
+  async searchItems(query: string) {
+    return this.get<{ items: ItemSearchResult[] }>("search_items", { query }).then(
+      (response) => response.items
+    );
+  }
+
+  async previewQuotation(customer: string, items: QuotationInputItem[]) {
+    return this.post<QuotationDetail>("preview_quotation", { customer, items: JSON.stringify(items) });
+  }
+
+  async saveQuotationDraft(customer: string, items: QuotationInputItem[]) {
+    return this.post<QuotationDetail & { message: string }>("save_quotation_draft", {
+      customer,
+      items: JSON.stringify(items)
+    });
+  }
+
   private async get<T>(method: string, params: Record<string, string> = {}) {
     const url = new URL(`${this.baseUrl}/api/method/gold_coast_field_connect.gold_coast_field_connect.api.${method}`);
     Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
     return this.request<T>(url.toString());
+  }
+
+  private async post<T>(method: string, params: Record<string, string>) {
+    const body = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => body.append(key, value));
+
+    return this.request<T>(`${this.baseUrl}/api/method/gold_coast_field_connect.gold_coast_field_connect.api.${method}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: body.toString()
+    });
   }
 
   private async request<T>(url: string, init: RequestInit = {}) {
@@ -125,4 +164,3 @@ function normalizeCookie(setCookie: string) {
     .filter((part) => part.startsWith("sid=") || part.startsWith("system_user=") || part.startsWith("user_id=") || part.startsWith("full_name="))
     .join("; ");
 }
-
