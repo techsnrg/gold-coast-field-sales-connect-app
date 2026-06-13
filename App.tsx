@@ -29,6 +29,19 @@ import {
 } from "./src/lib/types";
 
 type Tab = "home" | "quotations" | "profile";
+type QuotationStatus = "All" | "Draft" | "Submitted";
+
+const quotationListCache: {
+  items: QuotationListItem[];
+  status: QuotationStatus;
+  query: string;
+  loaded: boolean;
+} = {
+  items: [],
+  status: "All",
+  query: "",
+  loaded: false
+};
 
 export default function App() {
   const [session, setSession] = useState<StoredSession | null>(null);
@@ -96,6 +109,7 @@ function MainApp({ api, onLogout }: { api: ApiClient; onLogout: () => void }) {
             api={api}
             onBack={() => setCreatingQuotation(false)}
             onSaved={(quotation) => {
+              quotationListCache.loaded = false;
               setCreatingQuotation(false);
               setSelectedQuotation(quotation);
             }}
@@ -254,16 +268,21 @@ function QuotationsScreen({
   onSelect: (name: string) => void;
   onCreateQuotation: () => void;
 }) {
-  const [items, setItems] = useState<QuotationListItem[]>([]);
-  const [status, setStatus] = useState<"All" | "Draft" | "Submitted">("All");
-  const [query, setQuery] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState<QuotationListItem[]>(quotationListCache.items);
+  const [status, setStatus] = useState<QuotationStatus>(quotationListCache.status);
+  const [query, setQuery] = useState(quotationListCache.query);
+  const [loading, setLoading] = useState(!quotationListCache.loaded);
   const [error, setError] = useState("");
 
-  async function load() {
+  async function load(nextStatus = status, nextQuery = query) {
+    setLoading(true);
     setError("");
     try {
-      const result = await api.myQuotations(status, query);
+      const result = await api.myQuotations(nextStatus, nextQuery);
+      quotationListCache.items = result;
+      quotationListCache.status = nextStatus;
+      quotationListCache.query = nextQuery;
+      quotationListCache.loaded = true;
       setItems(result);
     } catch (err) {
       setError(readError(err, "Could not load quotations"));
@@ -273,7 +292,10 @@ function QuotationsScreen({
   }
 
   useEffect(() => {
-    load();
+    if (quotationListCache.loaded && quotationListCache.status === status && quotationListCache.query === query) {
+      return;
+    }
+    load(status, query);
   }, [status]);
 
   return (
@@ -284,7 +306,7 @@ function QuotationsScreen({
       </Pressable>
       <View style={styles.searchRow}>
         <TextInput value={query} onChangeText={setQuery} placeholder="Search quotation/customer" style={[styles.input, styles.searchInput]} />
-        <Pressable onPress={load} style={styles.smallButton}>
+        <Pressable onPress={() => load(status, query)} style={styles.smallButton}>
           <Text style={styles.smallButtonText}>Search</Text>
         </Pressable>
       </View>
@@ -299,8 +321,17 @@ function QuotationsScreen({
       <FlatList
         data={items}
         keyExtractor={(item) => item.name}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}
-        ListEmptyComponent={!loading ? <EmptyState label="No quotations found" /> : null}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={() => load(status, query)} />}
+        ListEmptyComponent={
+          loading ? (
+            <Centered>
+              <ActivityIndicator color={colors.primary} />
+              <Text style={styles.muted}>Loading quotations...</Text>
+            </Centered>
+          ) : (
+            <EmptyState label="No quotations found" />
+          )
+        }
         renderItem={({ item }) => (
           <Pressable onPress={() => onSelect(item.name)} style={styles.quotationCard}>
             <View style={styles.rowBetween}>
