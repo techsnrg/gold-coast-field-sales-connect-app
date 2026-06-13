@@ -639,6 +639,9 @@ function CreateQuotationScreen({
       }
       return [...current, { ...item, qty: 1 }];
     });
+    setItemQuery("");
+    setItemResults([]);
+    setError("");
   }
 
   function updateQty(itemCode: string, nextQty: number) {
@@ -810,27 +813,23 @@ function CreateQuotationScreen({
                 <Text style={styles.label}>Selected Items</Text>
                 {draftItems.map((item) => (
                   <View key={item.item_code} style={styles.selectedItemCard}>
-                    <View style={styles.flex}>
+                    <View>
                       <Text style={styles.itemName}>{item.item_name}</Text>
                       <Text style={styles.muted}>{item.item_code} • {item.stock_uom}</Text>
                     </View>
-                    <View style={styles.itemActions}>
+                    <View style={styles.itemEditRow}>
                       <View style={styles.qtyWrap}>
-                        <Pressable onPress={() => updateQty(item.item_code, item.qty - 1)} style={styles.qtyButton}>
-                          <MaterialCommunityIcons name="minus" size={18} color={colors.primary} />
-                        </Pressable>
+                        <Text style={styles.qtyLabel}>Qty</Text>
                         <TextInput
                           keyboardType="number-pad"
                           value={String(item.qty)}
                           onChangeText={(value) => updateQty(item.item_code, Number(value))}
                           style={styles.qtyInput}
                         />
-                        <Pressable onPress={() => updateQty(item.item_code, item.qty + 1)} style={styles.qtyButton}>
-                          <MaterialCommunityIcons name="plus" size={18} color={colors.primary} />
-                        </Pressable>
                       </View>
-                      <Pressable onPress={() => removeItem(item.item_code)} style={styles.iconButton}>
-                        <MaterialCommunityIcons name="trash-can-outline" size={20} color={colors.danger} />
+                      <Pressable onPress={() => removeItem(item.item_code)} style={styles.removeItemButton}>
+                        <MaterialCommunityIcons name="trash-can-outline" size={18} color={colors.danger} />
+                        <Text style={styles.removeItemText}>Remove</Text>
                       </Pressable>
                     </View>
                   </View>
@@ -839,10 +838,16 @@ function CreateQuotationScreen({
             ) : null}
             <Text style={styles.label}>Search Results</Text>
             {itemResults.map((item) => (
-              <Pressable key={item.item_code} onPress={() => addItem(item)} style={styles.resultCard}>
-                <Text style={styles.itemName}>{item.item_name}</Text>
-                <Text style={styles.muted}>{item.item_code} • {item.stock_uom} • {item.item_group}</Text>
-              </Pressable>
+              <View key={item.item_code} style={styles.itemResultCard}>
+                <View style={styles.flex}>
+                  <Text style={styles.itemName}>{item.item_name}</Text>
+                  <Text style={styles.muted}>{item.item_code} • {item.stock_uom} • {item.item_group}</Text>
+                </View>
+                <Pressable onPress={() => addItem(item)} style={styles.addItemButton}>
+                  <MaterialCommunityIcons name="plus" size={18} color="#fff" />
+                  <Text style={styles.addItemText}>Add</Text>
+                </Pressable>
+              </View>
             ))}
             {!itemResults.length && !loading ? <EmptyState label="Search allowed items" /> : null}
           </ScrollView>
@@ -1411,8 +1416,63 @@ const styles = StyleSheet.create({
     backgroundColor: "#F0FDF4"
   },
   selectedItemCard: {
+    backgroundColor: colors.card,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 12,
+    marginBottom: 8
+  },
+  itemEditRow: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginTop: 12
+  },
+  qtyWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    backgroundColor: "#F8FAFC",
+    paddingLeft: 12
+  },
+  qtyLabel: {
+    color: colors.muted,
+    fontWeight: "800",
+    marginRight: 8
+  },
+  qtyInput: {
+    width: 96,
+    height: 44,
+    textAlign: "right",
+    paddingHorizontal: 12,
+    color: colors.text,
+    backgroundColor: colors.card,
+    borderLeftWidth: 1,
+    borderLeftColor: colors.border,
+    fontSize: 17,
+    fontWeight: "800"
+  },
+  removeItemButton: {
+    minHeight: 44,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: "#FEF3F2"
+  },
+  removeItemText: {
+    color: colors.danger,
+    fontWeight: "800"
+  },
+  itemResultCard: {
+    flexDirection: "row",
+    alignItems: "center",
     gap: 10,
     backgroundColor: colors.card,
     borderRadius: 8,
@@ -1421,44 +1481,19 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 8
   },
-  itemActions: {
-    alignItems: "flex-end",
-    gap: 8
-  },
-  qtyWrap: {
+  addItemButton: {
+    minHeight: 42,
+    borderRadius: 8,
+    backgroundColor: colors.primary,
+    paddingHorizontal: 12,
     flexDirection: "row",
     alignItems: "center",
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
-    overflow: "hidden"
-  },
-  qtyButton: {
-    width: 34,
-    height: 38,
-    alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#F8FAFC"
+    gap: 4
   },
-  qtyButtonText: {
-    color: colors.primary,
-    fontWeight: "900",
-    fontSize: 18
-  },
-  qtyInput: {
-    width: 48,
-    height: 38,
-    textAlign: "center",
-    color: colors.text,
-    backgroundColor: colors.card
-  },
-  iconButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 8,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#FEF3F2"
+  addItemText: {
+    color: "#fff",
+    fontWeight: "800"
   },
   itemRow: {
     flexDirection: "row",
