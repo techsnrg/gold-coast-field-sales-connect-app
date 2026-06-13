@@ -127,14 +127,15 @@ export class ApiClient {
       ...init,
       credentials: "include",
       headers: {
+        Accept: "application/json",
         ...(this.cookie ? { Cookie: this.cookie } : {}),
         ...(init.headers || {})
       }
     });
 
-    const json = (await response.json()) as ApiEnvelope<T | ApiErrorBody> | { exception?: string; message?: string };
+    const json = await parseResponse(response);
     if (!response.ok) {
-      throw new ApiError("ERPNext request failed", "message" in json && typeof json.message === "string" ? json.message : "Please try again.");
+      throw new ApiError("ERPNext request failed", readFrappeError(json));
     }
 
     if ("message" in json && isApiErrorBody(json.message)) {
@@ -146,6 +147,64 @@ export class ApiClient {
     }
 
     throw new ApiError("ERPNext request failed", "Unexpected API response.");
+  }
+}
+
+async function parseResponse(response: Response) {
+  const text = await response.text();
+  if (!text) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(text) as ApiEnvelope<unknown> | { exception?: string; message?: unknown; _server_messages?: string };
+  } catch {
+    return { message: text };
+  }
+}
+
+function readFrappeError(json: { exception?: string; message?: unknown; _server_messages?: string }) {
+  const serverMessage = parseServerMessages(json._server_messages);
+  if (serverMessage) {
+    return serverMessage;
+  }
+
+  if (typeof json.message === "string") {
+    return json.message;
+  }
+
+  if (isApiErrorBody(json.message)) {
+    return json.message.message;
+  }
+
+  if (json.message && typeof json.message === "object") {
+    return JSON.stringify(json.message);
+  }
+
+  return json.exception || "Please try again.";
+}
+
+function parseServerMessages(value?: string) {
+  if (!value) {
+    return "";
+  }
+
+  try {
+    const messages = JSON.parse(value) as string[];
+    return messages
+      .map((message) => {
+        try {
+          const parsed = JSON.parse(message) as { message?: string; title?: string };
+          return parsed.message || parsed.title || "";
+        } catch {
+          return message;
+        }
+      })
+      .filter(Boolean)
+      .join("\n")
+      .replace(/<[^<]+?>/g, "");
+  } catch {
+    return value.replace(/<[^<]+?>/g, "");
   }
 }
 
