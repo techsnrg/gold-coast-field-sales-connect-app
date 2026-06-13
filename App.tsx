@@ -2,6 +2,7 @@ import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -30,6 +31,7 @@ import {
 
 type Tab = "home" | "quotations" | "profile";
 type QuotationStatus = "All" | "Draft" | "Submitted";
+type DraftItem = ItemSearchResult & { qty: number };
 
 const quotationListCache: {
   items: QuotationListItem[];
@@ -42,6 +44,29 @@ const quotationListCache: {
   query: "",
   loaded: false
 };
+
+const recentCustomersCache: CustomerSearchResult[] = [];
+
+function getRecentCustomers() {
+  if (recentCustomersCache.length) {
+    return recentCustomersCache;
+  }
+
+  const seen = new Set<string>();
+  return quotationListCache.items
+    .filter((row) => {
+      if (seen.has(row.customer)) {
+        return false;
+      }
+      seen.add(row.customer);
+      return true;
+    })
+    .slice(0, 5)
+    .map((row) => ({
+      name: row.customer,
+      customer_name: row.customer_name
+    }));
+}
 
 export default function App() {
   const [session, setSession] = useState<StoredSession | null>(null);
@@ -92,12 +117,25 @@ function MainApp({ api, onLogout }: { api: ApiClient; onLogout: () => void }) {
   const [tab, setTab] = useState<Tab>("home");
   const [selectedQuotation, setSelectedQuotation] = useState<string | null>(null);
   const [creatingQuotation, setCreatingQuotation] = useState(false);
+  const [editingQuotation, setEditingQuotation] = useState<QuotationDetail | null>(null);
+
+  function startCreateQuotation() {
+    setEditingQuotation(null);
+    setCreatingQuotation(true);
+  }
 
   return (
     <ScreenShell>
       <StatusBar style="dark" />
       <View style={styles.appHeader}>
-        <View>
+        <View style={styles.brandLogo}>
+          <Text style={styles.brandLogoMark}>G</Text>
+          <View>
+            <Text style={styles.brandLogoTitle}>GOLD COAST</Text>
+            <Text style={styles.brandLogoSubtitle}>ELECTRICALS</Text>
+          </View>
+        </View>
+        <View style={styles.brandCopy}>
           <Text style={styles.brandEyebrow}>Gold Coast</Text>
           <Text style={styles.brandTitle}>Field Connect</Text>
         </View>
@@ -107,10 +145,15 @@ function MainApp({ api, onLogout }: { api: ApiClient; onLogout: () => void }) {
         {creatingQuotation ? (
           <CreateQuotationScreen
             api={api}
-            onBack={() => setCreatingQuotation(false)}
+            initialQuotation={editingQuotation}
+            onBack={() => {
+              setCreatingQuotation(false);
+              setEditingQuotation(null);
+            }}
             onSaved={(quotation) => {
               quotationListCache.loaded = false;
               setCreatingQuotation(false);
+              setEditingQuotation(null);
               setSelectedQuotation(quotation);
             }}
           />
@@ -119,15 +162,25 @@ function MainApp({ api, onLogout }: { api: ApiClient; onLogout: () => void }) {
             api={api}
             quotation={selectedQuotation}
             onBack={() => setSelectedQuotation(null)}
+            onEdit={(detail) => {
+              setSelectedQuotation(null);
+              setEditingQuotation(detail);
+              setCreatingQuotation(true);
+            }}
+            onSubmitted={() => {
+              quotationListCache.loaded = false;
+              setSelectedQuotation(null);
+              setTab("quotations");
+            }}
           />
         ) : tab === "home" ? (
           <HomeScreen
             api={api}
-            onCreateQuotation={() => setCreatingQuotation(true)}
+            onCreateQuotation={startCreateQuotation}
             onOpenQuotations={() => setTab("quotations")}
           />
         ) : tab === "quotations" ? (
-          <QuotationsScreen api={api} onSelect={setSelectedQuotation} onCreateQuotation={() => setCreatingQuotation(true)} />
+          <QuotationsScreen api={api} onSelect={setSelectedQuotation} onCreateQuotation={startCreateQuotation} />
         ) : (
           <ProfileScreen api={api} onLogout={onLogout} />
         )}
@@ -348,9 +401,22 @@ function QuotationsScreen({
   );
 }
 
-function QuotationDetailScreen({ api, quotation, onBack }: { api: ApiClient; quotation: string; onBack: () => void }) {
+function QuotationDetailScreen({
+  api,
+  quotation,
+  onBack,
+  onEdit,
+  onSubmitted
+}: {
+  api: ApiClient;
+  quotation: string;
+  onBack: () => void;
+  onEdit: (detail: QuotationDetail) => void;
+  onSubmitted: () => void;
+}) {
   const [detail, setDetail] = useState<QuotationDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
   async function load() {
@@ -368,6 +434,38 @@ function QuotationDetailScreen({ api, quotation, onBack }: { api: ApiClient; quo
     load();
   }, [quotation]);
 
+  async function submitDraft() {
+    if (!detail || detail.docstatus !== 0) {
+      return;
+    }
+
+    Alert.alert(
+      "Submit quotation?",
+      "Submitting will trigger ERPNext submit flow and your existing WhatsApp process.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Submit",
+          style: "default",
+          onPress: async () => {
+            setSubmitting(true);
+            setError("");
+            try {
+              const submitted = await api.submitQuotation(detail.name);
+              quotationListCache.loaded = false;
+              setDetail(submitted);
+              onSubmitted();
+            } catch (err) {
+              setError(readError(err, "Could not submit quotation"));
+            } finally {
+              setSubmitting(false);
+            }
+          }
+        }
+      ]
+    );
+  }
+
   return (
     <ScrollView refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}>
       <Pressable onPress={onBack} style={styles.backButton}>
@@ -384,6 +482,16 @@ function QuotationDetailScreen({ api, quotation, onBack }: { api: ApiClient; quo
           <Text style={styles.screenTitle}>{detail.customer_name}</Text>
           <Text style={styles.amount}>{formatCurrency(detail.grand_total)}</Text>
           <Text style={styles.muted}>Net total {formatCurrency(detail.net_total)} • {detail.item_count} items</Text>
+          {detail.docstatus === 0 ? (
+            <View style={styles.actionRow}>
+              <Pressable onPress={() => onEdit(detail)} style={[styles.secondaryButton, styles.actionButton]}>
+                <Text style={styles.secondaryButtonText}>Edit Draft</Text>
+              </Pressable>
+              <Pressable disabled={submitting} onPress={submitDraft} style={[styles.primaryButton, styles.actionButton]}>
+                {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Submit</Text>}
+              </Pressable>
+            </View>
+          ) : null}
 
           <Text style={styles.sectionTitle}>Items</Text>
           {detail.items.map((item) => (
@@ -404,24 +512,45 @@ function QuotationDetailScreen({ api, quotation, onBack }: { api: ApiClient; quo
 
 function CreateQuotationScreen({
   api,
+  initialQuotation,
   onBack,
   onSaved
 }: {
   api: ApiClient;
+  initialQuotation: QuotationDetail | null;
   onBack: () => void;
   onSaved: (quotation: string) => void;
 }) {
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const isEditing = Boolean(initialQuotation);
+  const [step, setStep] = useState<1 | 2 | 3>(initialQuotation ? 2 : 1);
   const [customerQuery, setCustomerQuery] = useState("");
   const [customers, setCustomers] = useState<CustomerSearchResult[]>([]);
-  const [selectedCustomer, setSelectedCustomer] = useState<CustomerSearchResult | null>(null);
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerSearchResult | null>(
+    initialQuotation
+      ? {
+          name: initialQuotation.customer,
+          customer_name: initialQuotation.customer_name
+        }
+      : null
+  );
   const [itemQuery, setItemQuery] = useState("");
   const [itemResults, setItemResults] = useState<ItemSearchResult[]>([]);
-  const [draftItems, setDraftItems] = useState<Array<ItemSearchResult & { qty: number }>>([]);
+  const [draftItems, setDraftItems] = useState<DraftItem[]>(
+    initialQuotation
+      ? initialQuotation.items.map((item) => ({
+          item_code: item.item_code,
+          item_name: item.item_name,
+          stock_uom: item.uom,
+          item_group: "",
+          qty: item.qty
+        }))
+      : []
+  );
   const [preview, setPreview] = useState<QuotationDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [customersLoaded, setCustomersLoaded] = useState(false);
+  const [recentCustomers, setRecentCustomers] = useState<CustomerSearchResult[]>(getRecentCustomers());
 
   const inputItems: QuotationInputItem[] = draftItems.map((item) => ({
     item_code: item.item_code,
@@ -486,13 +615,20 @@ function CreateQuotationScreen({
     setLoading(true);
     setError("");
     try {
-      const saved = await api.saveQuotationDraft(selectedCustomer.name, inputItems);
+      const saved = await api.saveQuotationDraft(selectedCustomer.name, inputItems, initialQuotation?.name);
       onSaved(saved.name);
     } catch (err) {
       setError(readError(err, "Could not save quotation"));
     } finally {
       setLoading(false);
     }
+  }
+
+  function selectCustomer(customer: CustomerSearchResult) {
+    setSelectedCustomer(customer);
+    const nextRecent = [customer, ...recentCustomersCache.filter((row) => row.name !== customer.name)].slice(0, 5);
+    recentCustomersCache.splice(0, recentCustomersCache.length, ...nextRecent);
+    setRecentCustomers(nextRecent);
   }
 
   function addItem(item: ItemSearchResult) {
@@ -563,14 +699,14 @@ function CreateQuotationScreen({
   return (
     <View style={styles.flex}>
       <View style={styles.rowBetween}>
-        <Pressable onPress={step === 1 ? onBack : () => setStep((step - 1) as 1 | 2)} style={styles.backButton}>
+        <Pressable onPress={step === 1 || (isEditing && step === 2) ? onBack : () => setStep((step - 1) as 1 | 2)} style={styles.backButton}>
           <MaterialCommunityIcons name="arrow-left" size={20} color={colors.primary} />
-          <Text style={styles.backText}>{step === 1 ? "Close" : "Back"}</Text>
+          <Text style={styles.backText}>{step === 1 || (isEditing && step === 2) ? "Close" : "Back"}</Text>
         </Pressable>
         <Text style={styles.stepText}>Step {step} of 3</Text>
       </View>
 
-      <Text style={styles.screenTitle}>Create Quotation</Text>
+      <Text style={styles.screenTitle}>{isEditing ? `Edit ${initialQuotation?.name}` : "Create Quotation"}</Text>
       <View style={styles.stepBar}>
         <View style={[styles.stepDot, step >= 1 && styles.activeStepDot]} />
         <View style={[styles.stepLine, step >= 2 && styles.activeStepLine]} />
@@ -597,10 +733,33 @@ function CreateQuotationScreen({
             </Pressable>
           </View>
           {selectedCustomer ? (
-            <View style={styles.selectedBox}>
-              <Text style={styles.label}>Selected Customer</Text>
-              <Text style={styles.customerName}>{selectedCustomer.customer_name}</Text>
-              <Text style={styles.muted}>{selectedCustomer.name} {selectedCustomer.territory ? `• ${selectedCustomer.territory}` : ""}</Text>
+            <View style={styles.selectedCustomerBox}>
+              <MaterialCommunityIcons name="check-circle" size={22} color={colors.success} />
+              <View style={styles.flex}>
+                <Text style={styles.labelNoTop}>Selected Customer</Text>
+                <Text style={styles.customerNameTight}>{selectedCustomer.customer_name}</Text>
+                <Text style={styles.muted}>{selectedCustomer.name} {selectedCustomer.territory ? `• ${selectedCustomer.territory}` : ""}</Text>
+              </View>
+            </View>
+          ) : null}
+          {!customerQuery.trim() && recentCustomers.length ? (
+            <View style={styles.recentBlock}>
+              <Text style={styles.labelNoTop}>Recent Customers</Text>
+              {recentCustomers.map((item) => (
+                <Pressable
+                  key={item.name}
+                  onPress={() => selectCustomer(item)}
+                  style={[styles.resultCard, selectedCustomer?.name === item.name && styles.selectedResultCard]}
+                >
+                  <View style={styles.rowBetween}>
+                    <View style={styles.flex}>
+                      <Text style={styles.customerNameTight}>{item.customer_name}</Text>
+                      <Text style={styles.muted}>{item.name} {item.territory ? `• ${item.territory}` : ""}</Text>
+                    </View>
+                    {selectedCustomer?.name === item.name ? <MaterialCommunityIcons name="check" size={20} color={colors.success} /> : null}
+                  </View>
+                </Pressable>
+              ))}
             </View>
           ) : null}
           <FlatList
@@ -608,10 +767,18 @@ function CreateQuotationScreen({
             keyExtractor={(item) => item.name}
             ListEmptyComponent={!loading ? <EmptyState label="No assigned customers found" /> : null}
             renderItem={({ item }) => (
-              <Pressable onPress={() => setSelectedCustomer(item)} style={styles.resultCard}>
-                <Text style={styles.customerName}>{item.customer_name}</Text>
-                <Text style={styles.muted}>{item.name} {item.territory ? `• ${item.territory}` : ""}</Text>
-                {item.mobile_no ? <Text style={styles.muted}>{item.mobile_no}</Text> : null}
+              <Pressable
+                onPress={() => selectCustomer(item)}
+                style={[styles.resultCard, selectedCustomer?.name === item.name && styles.selectedResultCard]}
+              >
+                <View style={styles.rowBetween}>
+                  <View style={styles.flex}>
+                    <Text style={styles.customerNameTight}>{item.customer_name}</Text>
+                    <Text style={styles.muted}>{item.name} {item.territory ? `• ${item.territory}` : ""}</Text>
+                    {item.mobile_no ? <Text style={styles.muted}>{item.mobile_no}</Text> : null}
+                  </View>
+                  {selectedCustomer?.name === item.name ? <MaterialCommunityIcons name="check" size={20} color={colors.success} /> : null}
+                </View>
               </Pressable>
             )}
           />
@@ -647,23 +814,25 @@ function CreateQuotationScreen({
                       <Text style={styles.itemName}>{item.item_name}</Text>
                       <Text style={styles.muted}>{item.item_code} • {item.stock_uom}</Text>
                     </View>
-                    <View style={styles.qtyWrap}>
-                      <Pressable onPress={() => updateQty(item.item_code, item.qty - 1)} style={styles.qtyButton}>
-                        <Text style={styles.qtyButtonText}>-</Text>
-                      </Pressable>
-                      <TextInput
-                        keyboardType="number-pad"
-                        value={String(item.qty)}
-                        onChangeText={(value) => updateQty(item.item_code, Number(value))}
-                        style={styles.qtyInput}
-                      />
-                      <Pressable onPress={() => updateQty(item.item_code, item.qty + 1)} style={styles.qtyButton}>
-                        <Text style={styles.qtyButtonText}>+</Text>
+                    <View style={styles.itemActions}>
+                      <View style={styles.qtyWrap}>
+                        <Pressable onPress={() => updateQty(item.item_code, item.qty - 1)} style={styles.qtyButton}>
+                          <MaterialCommunityIcons name="minus" size={18} color={colors.primary} />
+                        </Pressable>
+                        <TextInput
+                          keyboardType="number-pad"
+                          value={String(item.qty)}
+                          onChangeText={(value) => updateQty(item.item_code, Number(value))}
+                          style={styles.qtyInput}
+                        />
+                        <Pressable onPress={() => updateQty(item.item_code, item.qty + 1)} style={styles.qtyButton}>
+                          <MaterialCommunityIcons name="plus" size={18} color={colors.primary} />
+                        </Pressable>
+                      </View>
+                      <Pressable onPress={() => removeItem(item.item_code)} style={styles.iconButton}>
+                        <MaterialCommunityIcons name="trash-can-outline" size={20} color={colors.danger} />
                       </Pressable>
                     </View>
-                    <Pressable onPress={() => removeItem(item.item_code)} style={styles.iconButton}>
-                      <MaterialCommunityIcons name="trash-can-outline" size={20} color={colors.danger} />
-                    </Pressable>
                   </View>
                 ))}
               </>
@@ -712,7 +881,7 @@ function CreateQuotationScreen({
                 <Text style={styles.secondaryButtonText}>Refresh Pricing</Text>
               </Pressable>
               <Pressable onPress={saveDraft} style={styles.primaryButton}>
-                <Text style={styles.primaryButtonText}>Save Draft</Text>
+                <Text style={styles.primaryButtonText}>{isEditing ? "Update Draft" : "Save Draft"}</Text>
               </Pressable>
             </>
           ) : (
@@ -859,7 +1028,46 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
-    backgroundColor: colors.card
+    backgroundColor: colors.card,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12
+  },
+  brandLogo: {
+    minWidth: 116,
+    borderRadius: 8,
+    backgroundColor: colors.primary,
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7
+  },
+  brandLogoMark: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: colors.accent,
+    color: "#fff",
+    fontWeight: "900",
+    textAlign: "center",
+    lineHeight: 24
+  },
+  brandLogoTitle: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 0.8
+  },
+  brandLogoSubtitle: {
+    color: colors.accent,
+    fontSize: 7,
+    fontWeight: "800",
+    letterSpacing: 1.5
+  },
+  brandCopy: {
+    flex: 1
   },
   brandEyebrow: {
     color: colors.accent,
@@ -952,6 +1160,15 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontWeight: "800",
     fontSize: 16
+  },
+  actionRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 14
+  },
+  actionButton: {
+    flex: 1,
+    marginTop: 0
   },
   errorText: {
     color: colors.danger,
@@ -1071,6 +1288,12 @@ const styles = StyleSheet.create({
     fontSize: 18,
     marginTop: 8
   },
+  customerNameTight: {
+    color: colors.text,
+    fontWeight: "800",
+    fontSize: 16,
+    marginTop: 3
+  },
   amount: {
     color: colors.text,
     fontSize: 22,
@@ -1161,6 +1384,20 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 12
   },
+  selectedCustomerBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#ECFDF3",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#ABEFC6",
+    padding: 12,
+    marginBottom: 12
+  },
+  recentBlock: {
+    marginBottom: 8
+  },
   resultCard: {
     backgroundColor: colors.card,
     borderRadius: 8,
@@ -1169,9 +1406,13 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 8
   },
+  selectedResultCard: {
+    borderColor: colors.success,
+    backgroundColor: "#F0FDF4"
+  },
   selectedItemCard: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: 10,
     backgroundColor: colors.card,
     borderRadius: 8,
@@ -1179,6 +1420,10 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     padding: 12,
     marginBottom: 8
+  },
+  itemActions: {
+    alignItems: "flex-end",
+    gap: 8
   },
   qtyWrap: {
     flexDirection: "row",
@@ -1244,6 +1489,10 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontWeight: "700",
     marginTop: 12
+  },
+  labelNoTop: {
+    color: colors.muted,
+    fontWeight: "700"
   },
   value: {
     color: colors.text,

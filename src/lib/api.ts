@@ -96,11 +96,16 @@ export class ApiClient {
     return this.post<QuotationDetail>("preview_quotation", { customer, items: JSON.stringify(items) });
   }
 
-  async saveQuotationDraft(customer: string, items: QuotationInputItem[]) {
+  async saveQuotationDraft(customer: string, items: QuotationInputItem[], quotation?: string) {
     return this.post<QuotationDetail & { message: string }>("save_quotation_draft", {
       customer,
+      ...(quotation ? { quotation } : {}),
       items: JSON.stringify(items)
     });
+  }
+
+  async submitQuotation(quotation: string) {
+    return this.post<QuotationDetail & { message: string }>("submit_quotation", { quotation });
   }
 
   private async get<T>(method: string, params: Record<string, string> = {}) {
