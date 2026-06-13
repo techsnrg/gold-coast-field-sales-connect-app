@@ -421,23 +421,19 @@ function CreateQuotationScreen({
   const [preview, setPreview] = useState<QuotationDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [customersLoaded, setCustomersLoaded] = useState(false);
 
   const inputItems: QuotationInputItem[] = draftItems.map((item) => ({
     item_code: item.item_code,
     qty: item.qty
   }));
 
-  async function searchCustomers() {
-    if (customerQuery.trim().length < 2) {
-      setCustomers([]);
-      setError("Enter at least 2 characters to search customers.");
-      return;
-    }
-
+  async function searchCustomers(nextQuery = customerQuery) {
     setLoading(true);
     setError("");
     try {
-      setCustomers(await api.searchCustomers(customerQuery.trim()));
+      setCustomers(await api.searchCustomers(nextQuery.trim()));
+      setCustomersLoaded(true);
     } catch (err) {
       setError(readError(err, "Could not find customers"));
     } finally {
@@ -517,6 +513,12 @@ function CreateQuotationScreen({
     setDraftItems((current) => current.filter((row) => row.item_code !== itemCode));
   }
 
+  useEffect(() => {
+    if (step === 1 && !customersLoaded) {
+      searchCustomers("");
+    }
+  }, [step, customersLoaded]);
+
   return (
     <View style={styles.flex}>
       <View style={styles.rowBetween}>
@@ -548,7 +550,7 @@ function CreateQuotationScreen({
               placeholder="Customer name, code, mobile"
               style={[styles.input, styles.searchInput]}
             />
-            <Pressable onPress={searchCustomers} style={styles.smallButton}>
+            <Pressable onPress={() => searchCustomers()} style={styles.smallButton}>
               {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.smallButtonText}>Search</Text>}
             </Pressable>
           </View>
@@ -562,7 +564,7 @@ function CreateQuotationScreen({
           <FlatList
             data={customers}
             keyExtractor={(item) => item.name}
-            ListEmptyComponent={!loading ? <EmptyState label="Search assigned customers" /> : null}
+            ListEmptyComponent={!loading ? <EmptyState label="No assigned customers found" /> : null}
             renderItem={({ item }) => (
               <Pressable onPress={() => setSelectedCustomer(item)} style={styles.resultCard}>
                 <Text style={styles.customerName}>{item.customer_name}</Text>
