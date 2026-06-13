@@ -441,8 +441,9 @@ function CreateQuotationScreen({
     }
   }
 
-  async function searchItems() {
-    if (itemQuery.trim().length < 2) {
+  async function searchItems(nextQuery = itemQuery) {
+    const query = nextQuery.trim();
+    if (query.length < 2) {
       setItemResults([]);
       setError("Enter at least 2 characters to search items.");
       return;
@@ -451,7 +452,7 @@ function CreateQuotationScreen({
     setLoading(true);
     setError("");
     try {
-      setItemResults(await api.searchItems(itemQuery.trim()));
+      setItemResults(await api.searchItems(query));
     } catch (err) {
       setError(readError(err, "Could not find items"));
     } finally {
@@ -519,6 +520,12 @@ function CreateQuotationScreen({
     }
   }, [step, customersLoaded]);
 
+  function loadCustomerPicker() {
+    if (!customerQuery.trim()) {
+      searchCustomers("");
+    }
+  }
+
   useEffect(() => {
     if (step !== 1) {
       return;
@@ -535,6 +542,23 @@ function CreateQuotationScreen({
 
     return () => clearTimeout(timeout);
   }, [step, customerQuery]);
+
+  useEffect(() => {
+    if (step !== 2) {
+      return;
+    }
+
+    const query = itemQuery.trim();
+    if (query.length < 2) {
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      searchItems(query);
+    }, 350);
+
+    return () => clearTimeout(timeout);
+  }, [step, itemQuery]);
 
   return (
     <View style={styles.flex}>
@@ -564,6 +588,7 @@ function CreateQuotationScreen({
             <TextInput
               value={customerQuery}
               onChangeText={setCustomerQuery}
+              onFocus={loadCustomerPicker}
               placeholder="Customer name, code, mobile"
               style={[styles.input, styles.searchInput]}
             />
@@ -608,7 +633,7 @@ function CreateQuotationScreen({
               placeholder="Item name or code"
               style={[styles.input, styles.searchInput]}
             />
-            <Pressable onPress={searchItems} style={styles.smallButton}>
+            <Pressable onPress={() => searchItems()} style={styles.smallButton}>
               {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.smallButtonText}>Search</Text>}
             </Pressable>
           </View>
