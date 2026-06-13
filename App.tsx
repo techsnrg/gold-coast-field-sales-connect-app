@@ -113,7 +113,7 @@ function MainApp({ api, onLogout }: { api: ApiClient; onLogout: () => void }) {
             onOpenQuotations={() => setTab("quotations")}
           />
         ) : tab === "quotations" ? (
-          <QuotationsScreen api={api} onSelect={setSelectedQuotation} />
+          <QuotationsScreen api={api} onSelect={setSelectedQuotation} onCreateQuotation={() => setCreatingQuotation(true)} />
         ) : (
           <ProfileScreen api={api} onLogout={onLogout} />
         )}
@@ -245,7 +245,15 @@ function HomeScreen({
   );
 }
 
-function QuotationsScreen({ api, onSelect }: { api: ApiClient; onSelect: (name: string) => void }) {
+function QuotationsScreen({
+  api,
+  onSelect,
+  onCreateQuotation
+}: {
+  api: ApiClient;
+  onSelect: (name: string) => void;
+  onCreateQuotation: () => void;
+}) {
   const [items, setItems] = useState<QuotationListItem[]>([]);
   const [status, setStatus] = useState<"All" | "Draft" | "Submitted">("All");
   const [query, setQuery] = useState("");
@@ -271,6 +279,9 @@ function QuotationsScreen({ api, onSelect }: { api: ApiClient; onSelect: (name: 
   return (
     <View style={styles.flex}>
       <Text style={styles.screenTitle}>My Quotations</Text>
+      <Pressable onPress={onCreateQuotation} style={styles.primaryButton}>
+        <Text style={styles.primaryButtonText}>Create Quotation</Text>
+      </Pressable>
       <View style={styles.searchRow}>
         <TextInput value={query} onChangeText={setQuery} placeholder="Search quotation/customer" style={[styles.input, styles.searchInput]} />
         <Pressable onPress={load} style={styles.smallButton}>
