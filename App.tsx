@@ -556,6 +556,7 @@ function CreateQuotationScreen({
     item_code: item.item_code,
     qty: item.qty
   }));
+  const canReviewPricing = draftItems.length > 0 && draftItems.every((item) => item.qty > 0);
 
   async function searchCustomers(nextQuery = customerQuery) {
     setLoading(true);
@@ -635,9 +636,9 @@ function CreateQuotationScreen({
     setDraftItems((current) => {
       const existing = current.find((row) => row.item_code === item.item_code);
       if (existing) {
-        return current.map((row) => (row.item_code === item.item_code ? { ...row, qty: row.qty + 1 } : row));
+        return current.map((row) => (row.item_code === item.item_code && row.qty === 0 ? { ...row, qty: 1 } : row));
       }
-      return [...current, { ...item, qty: 1 }];
+      return [...current, { ...item, qty: 0 }];
     });
     setItemQuery("");
     setItemResults([]);
@@ -645,7 +646,7 @@ function CreateQuotationScreen({
   }
 
   function updateQty(itemCode: string, nextQty: number) {
-    const qty = Math.max(1, Math.floor(nextQty || 1));
+    const qty = Math.max(0, Math.floor(nextQty || 0));
     setDraftItems((current) => current.map((row) => (row.item_code === itemCode ? { ...row, qty } : row)));
   }
 
@@ -824,6 +825,7 @@ function CreateQuotationScreen({
                           keyboardType="number-pad"
                           value={String(item.qty)}
                           onChangeText={(value) => updateQty(item.item_code, Number(value))}
+                          selectTextOnFocus
                           style={styles.qtyInput}
                         />
                       </View>
@@ -851,7 +853,8 @@ function CreateQuotationScreen({
             ))}
             {!itemResults.length && !loading ? <EmptyState label="Search allowed items" /> : null}
           </ScrollView>
-          <Pressable disabled={!draftItems.length} onPress={loadPreview} style={[styles.primaryButton, !draftItems.length && styles.disabledButton]}>
+          {!canReviewPricing && draftItems.length ? <Text style={styles.qtyHint}>Enter quantity for every selected item.</Text> : null}
+          <Pressable disabled={!canReviewPricing} onPress={loadPreview} style={[styles.primaryButton, !canReviewPricing && styles.disabledButton]}>
             <Text style={styles.primaryButtonText}>Review Pricing</Text>
           </Pressable>
         </View>
@@ -1455,6 +1458,12 @@ const styles = StyleSheet.create({
     borderLeftColor: colors.border,
     fontSize: 17,
     fontWeight: "800"
+  },
+  qtyHint: {
+    color: colors.muted,
+    fontSize: 13,
+    textAlign: "center",
+    marginBottom: 8
   },
   removeItemButton: {
     minHeight: 44,
