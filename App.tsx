@@ -519,6 +519,23 @@ function CreateQuotationScreen({
     }
   }, [step, customersLoaded]);
 
+  useEffect(() => {
+    if (step !== 1) {
+      return;
+    }
+
+    const query = customerQuery.trim();
+    if (!query || query.length < 2) {
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      searchCustomers(query);
+    }, 350);
+
+    return () => clearTimeout(timeout);
+  }, [step, customerQuery]);
+
   return (
     <View style={styles.flex}>
       <View style={styles.rowBetween}>
